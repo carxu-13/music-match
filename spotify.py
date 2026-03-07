@@ -10,7 +10,7 @@ def get_spotify_client():
     return spotipy.Spotify(auth_manager=SpotifyOAuth(
         client_id=     os.getenv("SPOTIFY_CLIENT_ID"),
         client_secret= os.getenv("SPOTIFY_CLIENT_SECRET"),
-        redirect_uri=  "http://localhost:8888/callback",
+        redirect_uri=  "http://127.0.0.1:8000/callback",
         scope=         "user-read-recently-played",
         cache_path=    ".spotify_cache"   # saves token so you don't re-auth every time
     ))

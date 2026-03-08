@@ -15,25 +15,41 @@ def get_access_token():
     r.raise_for_status()
     return r.json()["access_token"]
 
+# Activity types where cadence (steps/min) data is available
+CADENCE_ACTIVITY_TYPES = {
+    "Run", "TrailRun", "VirtualRun",
+    "Walk", "Hike",
+    "Elliptical", "StairStepper",
+    "Snowshoe", "RockClimbing",
+}
+
+
 def get_recent_activities(access_token, n=10):
-    """Return a list of your n most recent activities."""
+    """Return a list of your n most recent activities that support cadence data."""
     r = requests.get(
         "https://www.strava.com/api/v3/athlete/activities",
         headers={"Authorization": f"Bearer {access_token}"},
-        params={"per_page": n}
+        params={"per_page": n * 3}  # fetch extra to account for filtered-out types
     )
     r.raise_for_status()
-    return [
-        {
-            "id":         a["id"],
-            "name":       a["name"],
-            "type":       a["type"],
-            "start_time": a["start_date"],          # UTC ISO string
-            "duration_s": a["elapsed_time"],         # total seconds
-            "distance_m": a["distance"]
-        }
-        for a in r.json()
-    ]
+
+    activities = []
+    for a in r.json():
+        if a["type"] not in CADENCE_ACTIVITY_TYPES:
+            continue
+        activities.append({
+            "id":            a["id"],
+            "name":          a["name"],
+            "type":          a["type"],
+            "start_time":    a["start_date"],          # UTC ISO string
+            "duration_s":    a["elapsed_time"],         # total seconds
+            "distance_m":    a["distance"],
+            "has_heartrate": a.get("has_heartrate", False),
+        })
+        if len(activities) >= n:
+            break
+
+    return activities
 
 def get_streams(activity_id, access_token):
     """

@@ -1,4 +1,5 @@
 import json
+import os
 from strava   import get_access_token, get_recent_activities, get_streams
 from spotify  import get_spotify_client, get_tracks_during_activity, get_audio_features
 from matcher  import align_songs_to_activity, print_summary
@@ -15,7 +16,8 @@ def main():
 
     for i, a in enumerate(activities):
         duration_min = a["duration_s"] // 60
-        print(f"  [{i}] {a['name']} — {a['type']} — {a['start_time']} — {duration_min} min")
+        hr_flag = "HR" if a.get("has_heartrate") else "no HR"
+        print(f"  [{i}] {a['name']} — {a['type']} — {a['start_time']} — {duration_min} min — {hr_flag}")
 
     idx = int(input("\nEnter the number of the activity to analyze: "))
     activity = activities[idx]
@@ -26,8 +28,12 @@ def main():
     streams = get_streams(activity["id"], strava_token)
 
     if not streams["time"]:
-        print("No stream data found for this activity. Does it have HR data recorded?")
+        print("No stream data found for this activity.")
         return
+
+    if not streams["hr"]:
+        print("Warning: No heart rate data found for this activity.")
+        print("  HR columns will be empty. Use a heart rate monitor for HR data.")
 
     # --- 4. Fetch Spotify tracks ---
     print("Fetching Spotify recently played...")
@@ -44,7 +50,7 @@ def main():
     # --- 5. Fetch audio features (BPM, energy, etc.) ---
     print("Fetching Spotify audio features...")
     track_ids = [t["spotify_id"] for t in tracks]
-    audio_features = get_audio_features(sp, track_ids)
+    audio_features = get_audio_features(sp, track_ids, os.getenv("GETSONGBPM_API_KEY"))
 
     # --- 6. Match songs to activity segments ---
     print("Matching songs to activity data...")

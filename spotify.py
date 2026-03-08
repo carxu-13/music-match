@@ -1,5 +1,7 @@
 import os
+import re
 import spotipy
+import requests
 from spotipy.oauth2 import SpotifyOAuth
 from datetime import datetime, timezone
 from dotenv import load_dotenv
@@ -53,20 +55,80 @@ def get_tracks_during_activity(sp, activity_start_iso, activity_duration_s):
     # Sort chronologically
     return sorted(tracks, key=lambda t: t["start_ts"])
 
-def get_audio_features(sp, track_ids):
+def _clean_track_name(name):
+    """Strip feat./ft., parenthetical content, and special chars for better search."""
+    name = re.sub(r"\s*\(.*?\)", "", name)       # remove (feat. X), (Remix), etc.
+    name = re.sub(r"\s*\[.*?\]", "", name)       # remove [Deluxe], etc.
+    name = re.sub(r"\s*[-–—].*feat\..*", "", name, flags=re.IGNORECASE)
+    name = re.sub(r"\s*feat\..*", "", name, flags=re.IGNORECASE)
+    name = re.sub(r"\s*ft\..*", "", name, flags=re.IGNORECASE)
+    return name.strip()
+
+
+def _search_getsongbpm(api_key, song_name, artist=None):
+    """Search GetSongBPM and return the tempo if found, else None."""
+    if artist:
+        lookup = f"song:{song_name} artist:{artist}"
+        search_type = "both"
+    else:
+        lookup = song_name
+        search_type = "song"
+
+    r = requests.get(
+        "https://api.getsongbpm.com/search/",
+        params={"api_key": api_key, "type": search_type, "lookup": lookup}
+    )
+
+    if r.status_code != 200:
+        return None
+
+    search_results = r.json().get("search")
+    if not search_results:
+        return None
+
+    tempo = search_results[0].get("tempo")
+    return float(tempo) if tempo else None
+
+
+def get_audio_features(sp, track_ids, getbpm_api_key=None):
     """
-    Fetch BPM, energy, valence etc. for a list of spotify track IDs.
-    Returns a dict keyed by track_id.
+    Fetch BPM and other features for a list of Spotify track IDs.
+    Uses GetSongBPM API as a replacement for Spotify's deprecated audio-features endpoint.
     """
-    if not track_ids:
+    if not track_ids or not getbpm_api_key:
         return {}
-    features = sp.audio_features(track_ids)
-    return {
-        f["id"]: {
-            "bpm":     f["tempo"],
-            "energy":  f["energy"],    # 0.0–1.0, intensity
-            "valence": f["valence"],   # 0.0–1.0, musical positivity
-            "danceability": f["danceability"]
+
+    features = {}
+
+    for track_id in track_ids:
+        track_info = sp.track(track_id)
+        raw_name = track_info["name"]
+        raw_artist = track_info["artists"][0]["name"]
+
+        clean_name = _clean_track_name(raw_name)
+        clean_artist = _clean_track_name(raw_artist)
+
+        # Try: cleaned song + artist
+        bpm = _search_getsongbpm(getbpm_api_key, clean_name, clean_artist)
+
+        # Fallback: song name only
+        if bpm is None:
+            bpm = _search_getsongbpm(getbpm_api_key, clean_name)
+
+        # Fallback: raw song name only
+        if bpm is None and clean_name != raw_name:
+            bpm = _search_getsongbpm(getbpm_api_key, raw_name)
+
+        if bpm:
+            print(f"  BPM found: {raw_name} -> {int(bpm)} BPM")
+        else:
+            print(f"  BPM not found: {raw_name}")
+
+        features[track_id] = {
+            "bpm":         bpm,
+            "energy":      None,
+            "valence":     None,
+            "danceability": None
         }
-        for f in features if f is not None
-    }
+
+    return features

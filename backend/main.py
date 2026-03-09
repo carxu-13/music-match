@@ -1,5 +1,4 @@
 import json
-import os
 from strava   import get_access_token, get_recent_activities, get_streams
 from spotify  import get_spotify_client, get_tracks_during_activity, get_audio_features
 from matcher  import align_songs_to_activity, print_summary
@@ -32,8 +31,21 @@ def main():
         return
 
     if not streams["hr"]:
-        print("Warning: No heart rate data found for this activity.")
-        print("  HR columns will be empty. Use a heart rate monitor for HR data.")
+        print("No HR data from Strava. Trying Garmin Connect...")
+        try:
+            from garmin import get_garmin_client, get_garmin_hr_for_strava_activity
+            gc = get_garmin_client()
+            if gc:
+                hr_data = get_garmin_hr_for_strava_activity(
+                    gc, activity["start_time"], activity["duration_s"]
+                )
+                if hr_data:
+                    streams["hr"] = hr_data
+                    print(f"  Got {len(hr_data)} HR samples from Garmin!")
+                else:
+                    print("  No HR data found in Garmin either.")
+        except Exception as e:
+            print(f"  Garmin HR fetch failed: {e}")
 
     # --- 4. Fetch Spotify tracks ---
     print("Fetching Spotify recently played...")
@@ -41,16 +53,16 @@ def main():
 
     if not tracks:
         print("\nNo Spotify tracks found during this activity window.")
-        print("Note: Spotify only stores the last ~24 hours of history.")
-        print("Run this script soon after your activity for best results.")
+        print("Tip: Run this script soon after your activity to cache tracks.")
+        print("     Cached tracks are stored in spotify_track_cache.json for future use.")
         return
 
     print(f"Found {len(tracks)} tracks during this activity.")
 
-    # --- 5. Fetch audio features (BPM, energy, etc.) ---
-    print("Fetching Spotify audio features...")
+    # --- 5. Fetch BPM via web search ---
+    print("Searching for BPM data...")
     track_ids = [t["spotify_id"] for t in tracks]
-    audio_features = get_audio_features(sp, track_ids, os.getenv("GETSONGBPM_API_KEY"))
+    audio_features = get_audio_features(sp, track_ids)
 
     # --- 6. Match songs to activity segments ---
     print("Matching songs to activity data...")

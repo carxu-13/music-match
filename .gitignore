@@ -136,6 +136,10 @@ celerybeat.pid
 
 # Environments
 .env
+.spotify_cache
+spotify_track_cache.json
+uploads/
+node_modules/
 .envrc
 .venv
 env/

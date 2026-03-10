@@ -185,6 +185,19 @@ def list_activities():
     if token in _uploaded_activities:
         activities.extend(_uploaded_activities[token])
 
+    # Mark which activities have cached Spotify tracks available
+    from spotify import _load_track_cache
+    cached_tracks = _load_track_cache()
+
+    for act in activities:
+        start_dt = datetime.fromisoformat(act["start_time"].replace("Z", "+00:00"))
+        start_ts = start_dt.timestamp()
+        end_ts = start_ts + act["duration_s"]
+        act["has_tracks"] = any(
+            t["end_ts"] >= start_ts and t["start_ts"] <= end_ts
+            for t in cached_tracks
+        )
+
     return jsonify(activities)
 
 
@@ -210,8 +223,9 @@ def analyze_activity(activity_id):
             return jsonify({"error": "Activity not found"}), 404
         streams = get_streams(activity_id, strava_token)
 
-    # Try Garmin for HR if Strava has none
-    if not streams.get("hr"):
+    # Try Garmin for HR if Strava has none (or all zeros)
+    hr = streams.get("hr", [])
+    if not hr or not any(v > 0 for v in hr):
         garmin_client = _garmin_clients.get(token)
         if garmin_client:
             from garmin import get_garmin_hr_for_strava_activity
@@ -221,8 +235,13 @@ def analyze_activity(activity_id):
                 )
                 if hr_data:
                     streams["hr"] = hr_data
-            except Exception:
-                pass
+                    print(f"Garmin HR data found for activity {activity_id}: {len(hr_data)} points")
+                else:
+                    print(f"Garmin returned no HR data for activity {activity_id}")
+            except Exception as e:
+                import traceback
+                print(f"Garmin HR extraction failed: {e}")
+                traceback.print_exc()
 
     # Get Spotify tracks
     tracks = []

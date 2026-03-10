@@ -138,6 +138,9 @@ celerybeat.pid
 .env
 .spotify_cache
 spotify_track_cache.json
+bpm_cache.json
+bpm_cache.json.bak
+bpm_cache.db
 uploads/
 node_modules/
 .envrc

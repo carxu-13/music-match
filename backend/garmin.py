@@ -70,13 +70,15 @@ def get_garmin_hr_for_strava_activity(client, strava_start_iso, strava_duration_
         if not gmt_str:
             continue
         try:
-            garmin_start = datetime.fromisoformat(gmt_str.replace("Z", "+00:00"))
-        except ValueError:
-            # Sometimes Garmin returns format without timezone info
-            try:
-                garmin_start = datetime.fromisoformat(gmt_str + "+00:00")
-            except ValueError:
-                continue
+            # Garmin startTimeGMT is typically "2026-03-06 14:02:25" (naive, UTC)
+            # or sometimes "2026-03-06T14:02:25.000Z"
+            cleaned = gmt_str.replace("Z", "").replace("+00:00", "").strip()
+            garmin_start = datetime.fromisoformat(cleaned).replace(
+                tzinfo=strava_start.tzinfo
+            )
+        except (ValueError, TypeError) as e:
+            print(f"  Skipping Garmin activity with unparseable time: {gmt_str} ({e})")
+            continue
 
         diff = abs((garmin_start - strava_start).total_seconds())
         if diff < best_diff:
@@ -103,8 +105,8 @@ def _extract_hr_stream(client, activity_id, expected_duration_s):
     """
     max_chart = max(2000, int(expected_duration_s * 1.1))
     details = client.get_activity_details(activity_id, maxchart=max_chart)
-
     if not details:
+        print("  Garmin activity details returned empty")
         return []
 
     # Find which array index corresponds to heart rate

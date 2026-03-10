@@ -7,5 +7,7 @@ start virtual environment
 ` python3 -m venv venv `
 ` venv\Scripts\activate `
 
-to run the actual program 
-` python main.py `
+to run the backend
+``` python server.py ```
+to run the frontend
+``` npm run dev ```

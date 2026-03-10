@@ -36,16 +36,49 @@ def align_songs_to_activity(activity, streams, spotify_tracks, audio_features=No
             continue
 
         def safe_mean(arr):
-            vals = [arr[i] for i in idxs if i < len(arr)]
+            vals = [arr[i] for i in idxs if i < len(arr) and arr[i]]
             return round(float(np.mean(vals)), 1) if vals else None
 
         def safe_max(arr):
-            vals = [arr[i] for i in idxs if i < len(arr)]
+            vals = [arr[i] for i in idxs if i < len(arr) and arr[i]]
             return round(float(np.max(vals)), 1) if vals else None
 
+        def safe_min(arr):
+            vals = [arr[i] for i in idxs if i < len(arr) and arr[i]]
+            return round(float(np.min(vals)), 1) if vals else None
+
         avg_speed_ms = safe_mean(speed_arr)
-        # Convert m/s to min/mile (imperial)
-        avg_speed_min_per_mile = round(1609.34 / (avg_speed_ms * 60), 2) if avg_speed_ms else None
+        max_speed_ms = safe_max(speed_arr)
+        avg_speed_min_per_mile = round(1609.34 / (avg_speed_ms * 60), 2) if avg_speed_ms and avg_speed_ms > 0 else None
+        fastest_pace = round(1609.34 / (max_speed_ms * 60), 2) if max_speed_ms and max_speed_ms > 0 else None
+
+        # Per-point pace series for chart (sampled to ~60 points per song)
+        pace_series = []
+        time_series = []
+        step = max(1, len(idxs) // 60)
+        for j in range(0, len(idxs), step):
+            i = idxs[j]
+            if i < len(speed_arr) and speed_arr[i] and speed_arr[i] > 0.1:
+                pace_series.append(round(1609.34 / (speed_arr[i] * 60), 2))
+                time_series.append(round(time_arr[i]))
+
+        # Elevation
+        alt_vals = [altitude_arr[i] for i in idxs if i < len(altitude_arr)]
+        elevation_gain_ft = round((max(alt_vals) - min(alt_vals)) * 3.28084, 1) if alt_vals else None
+        avg_elevation_ft = round(float(np.mean(alt_vals)) * 3.28084, 1) if alt_vals else None
+
+        # Cadence
+        avg_cadence = safe_mean(cadence_arr)
+        avg_spm = round(avg_cadence * 2, 1) if avg_cadence else None
+
+        # Distance during this song
+        distance_m = 0
+        for j in range(1, len(idxs)):
+            i_prev, i_curr = idxs[j-1], idxs[j]
+            if i_curr < len(speed_arr) and i_curr < len(time_arr):
+                dt = time_arr[i_curr] - time_arr[i_prev]
+                distance_m += speed_arr[i_curr] * dt
+        distance_mi = round(distance_m / 1609.34, 2) if distance_m else None
 
         entry = {
             "track":                  track["name"],
@@ -57,17 +90,20 @@ def align_songs_to_activity(activity, streams, spotify_tracks, audio_features=No
 
             "avg_hr":                 safe_mean(hr_arr),
             "max_hr":                 safe_max(hr_arr),
-            "avg_spm":                round(safe_mean(cadence_arr) * 2, 1) if safe_mean(cadence_arr) else None,
+            "min_hr":                 safe_min(hr_arr),
+            "avg_spm":                avg_spm,
             "avg_speed_ms":           avg_speed_ms,
             "avg_speed_min_per_mile": avg_speed_min_per_mile,
+            "fastest_pace":           fastest_pace,
+            "distance_mi":            distance_mi,
+            "elevation_gain_ft":      elevation_gain_ft,
+            "avg_elevation_ft":       avg_elevation_ft,
 
-            "elevation_gain_ft": round(
-                (max(altitude_arr[i] for i in idxs if i < len(altitude_arr)) -
-                 min(altitude_arr[i] for i in idxs if i < len(altitude_arr))) * 3.28084, 1
-            ) if altitude_arr else None,
-
-            "hr_series":  [hr_arr[i] for i in idxs if i < len(hr_arr)],
-            "spm_series": [cadence_arr[i] * 2 for i in idxs if i < len(cadence_arr)],
+            # Series data for interactive charts
+            "hr_series":    [hr_arr[i] for i in idxs if i < len(hr_arr)],
+            "spm_series":   [cadence_arr[i] * 2 for i in idxs if i < len(cadence_arr)],
+            "pace_series":  pace_series,
+            "time_series":  time_series,
         }
 
         # Attach audio features if available

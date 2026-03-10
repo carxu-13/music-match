@@ -52,15 +52,30 @@ def align_songs_to_activity(activity, streams, spotify_tracks, audio_features=No
         avg_speed_min_per_mile = round(1609.34 / (avg_speed_ms * 60), 2) if avg_speed_ms and avg_speed_ms > 0 else None
         fastest_pace = round(1609.34 / (max_speed_ms * 60), 2) if max_speed_ms and max_speed_ms > 0 else None
 
-        # Per-point pace series for chart (sampled to ~60 points per song)
-        pace_series = []
+        # Per-point series for chart — ALL metrics sampled at the SAME time points
+        sampled_pace = []
+        sampled_hr = []
+        sampled_spm = []
         time_series = []
         step = max(1, len(idxs) // 60)
         for j in range(0, len(idxs), step):
             i = idxs[j]
+            time_series.append(round(time_arr[i]))
+            # Pace
             if i < len(speed_arr) and speed_arr[i] and speed_arr[i] > 0.1:
-                pace_series.append(round(1609.34 / (speed_arr[i] * 60), 2))
-                time_series.append(round(time_arr[i]))
+                sampled_pace.append(round(1609.34 / (speed_arr[i] * 60), 2))
+            else:
+                sampled_pace.append(None)
+            # HR
+            if i < len(hr_arr) and hr_arr[i]:
+                sampled_hr.append(int(hr_arr[i]))
+            else:
+                sampled_hr.append(None)
+            # SPM
+            if i < len(cadence_arr) and cadence_arr[i]:
+                sampled_spm.append(round(cadence_arr[i] * 2, 1))
+            else:
+                sampled_spm.append(None)
 
         # Elevation
         alt_vals = [altitude_arr[i] for i in idxs if i < len(altitude_arr)]
@@ -99,10 +114,10 @@ def align_songs_to_activity(activity, streams, spotify_tracks, audio_features=No
             "elevation_gain_ft":      elevation_gain_ft,
             "avg_elevation_ft":       avg_elevation_ft,
 
-            # Series data for interactive charts
-            "hr_series":    [hr_arr[i] for i in idxs if i < len(hr_arr)],
-            "spm_series":   [cadence_arr[i] * 2 for i in idxs if i < len(cadence_arr)],
-            "pace_series":  pace_series,
+            # Series data for interactive charts (all aligned to same time_series)
+            "hr_series":    sampled_hr,
+            "spm_series":   sampled_spm,
+            "pace_series":  sampled_pace,
             "time_series":  time_series,
         }
 
@@ -116,6 +131,30 @@ def align_songs_to_activity(activity, streams, spotify_tracks, audio_features=No
         matched.append(entry)
 
     return matched
+
+
+def build_activity_series(streams):
+    """Build sampled time-series data from raw streams (for chart without songs)."""
+    time_arr = streams.get("time", [])
+    hr_arr = streams.get("hr", [])
+    cadence_arr = streams.get("cadence", [])
+    speed_arr = streams.get("speed", [])
+
+    if not time_arr:
+        return []
+
+    step = max(1, len(time_arr) // 300)  # cap at ~300 points
+    series = []
+    for j in range(0, len(time_arr), step):
+        point = {"time": round(time_arr[j])}
+        if j < len(speed_arr) and speed_arr[j] and speed_arr[j] > 0.1:
+            point["pace"] = round(1609.34 / (speed_arr[j] * 60), 2)
+        if j < len(hr_arr) and hr_arr[j]:
+            point["hr"] = int(hr_arr[j])
+        if j < len(cadence_arr) and cadence_arr[j]:
+            point["spm"] = round(cadence_arr[j] * 2, 1)
+        series.append(point)
+    return series
 
 
 def fmt_time(total_seconds):

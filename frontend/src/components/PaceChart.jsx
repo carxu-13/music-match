@@ -1,6 +1,6 @@
 import { useState, useMemo } from 'react'
 import {
-  ComposedChart, Line, Area, XAxis, YAxis, Tooltip,
+  ComposedChart, Line, XAxis, YAxis, Tooltip,
   CartesianGrid, ResponsiveContainer, ReferenceArea, ReferenceLine,
 } from 'recharts'
 
@@ -29,14 +29,21 @@ function fmtTime(seconds) {
   return `${m}:${String(s).padStart(2, '0')}`
 }
 
-export default function PaceChart({ tracks, duration }) {
+export default function PaceChart({ tracks = [], duration, rawSeries = [] }) {
+  const hasTracks = tracks.length > 0
   const [activeMetrics, setActiveMetrics] = useState(['pace'])
 
-  // Build a unified time-series dataset from all tracks
+  // Build a unified time-series dataset
   const { chartData, songBands } = useMemo(() => {
-    const points = []
     const bands = []
 
+    // If no tracks, use rawSeries directly
+    if (!hasTracks) {
+      return { chartData: rawSeries, songBands: [] }
+    }
+
+    // Build chart data from per-track series — all series are aligned to same time points
+    const points = []
     tracks.forEach((t, idx) => {
       bands.push({
         x1: t.offset_start_s,
@@ -47,56 +54,61 @@ export default function PaceChart({ tracks, duration }) {
         bpm: t.bpm,
       })
 
-      // Use per-point series data if available, otherwise use averages
       const timeArr = t.time_series || []
       const paceArr = t.pace_series || []
       const hrArr = t.hr_series || []
       const spmArr = t.spm_series || []
 
       if (timeArr.length > 0) {
+        // All arrays are aligned to same time points from backend
         timeArr.forEach((time, i) => {
           points.push({
             time,
-            pace: paceArr[i] || null,
-            hr: i < hrArr.length ? (hrArr[i] || null) : null,
-            spm: i < spmArr.length ? (spmArr[i] || null) : null,
+            pace: i < paceArr.length ? paceArr[i] : null,
+            hr: i < hrArr.length ? hrArr[i] : null,
+            spm: i < spmArr.length ? spmArr[i] : null,
             bpm: t.bpm || null,
-            songIdx: idx,
           })
         })
       } else {
-        // Fallback: single point per song at midpoint
-        const mid = (t.offset_start_s + t.offset_end_s) / 2
-        points.push({
-          time: mid,
+        // Fallback: two points at song boundaries (for step function)
+        const fallback = {
           pace: t.avg_speed_min_per_mile || null,
           hr: t.avg_hr || null,
           spm: t.avg_spm || null,
           bpm: t.bpm || null,
-          songIdx: idx,
-        })
+        }
+        points.push({ time: t.offset_start_s, ...fallback })
+        points.push({ time: t.offset_end_s, ...fallback })
       }
     })
 
+    // Sort by time — since track time windows don't overlap, this preserves song order
     points.sort((a, b) => a.time - b.time)
     return { chartData: points, songBands: bands }
-  }, [tracks])
+  }, [tracks, rawSeries, hasTracks])
 
   if (!chartData.length) return null
 
   const toggleMetric = (key) => {
+    if (key === 'bpm' && !hasTracks) return
     setActiveMetrics(prev =>
       prev.includes(key) ? prev.filter(k => k !== key) : [...prev, key]
     )
   }
 
-  // Determine Y domain for active metrics
-  const hasInverted = activeMetrics.some(k => METRICS[k]?.invert)
+  // Find the song playing at a given time (for tooltip)
+  const findSongAt = (time) => {
+    if (!hasTracks) return null
+    for (const t of tracks) {
+      if (time >= t.offset_start_s && time <= t.offset_end_s) return t
+    }
+    return null
+  }
 
   const CustomTooltip = ({ active, payload, label }) => {
     if (!active || !payload?.length) return null
-    const songIdx = payload[0]?.payload?.songIdx
-    const song = songIdx != null ? tracks[songIdx] : null
+    const song = findSongAt(label)
 
     return (
       <div style={{
@@ -110,19 +122,23 @@ export default function PaceChart({ tracks, duration }) {
           </div>
         )}
         {payload.map((p, i) => {
+          if (p.value == null) return null
           const metric = Object.values(METRICS).find(m => m.key === p.dataKey)
-          const val = p.dataKey === 'pace' ? fmtPace(p.value) :
-                      p.value != null ? Math.round(p.value) : '?'
+          const val = p.dataKey === 'pace' ? fmtPace(p.value) + ' /mi' :
+                      Math.round(p.value)
           return (
             <div key={i} style={{ color: p.color }}>
               {metric?.label || p.dataKey}: <strong>{val}</strong>
-              {p.dataKey === 'pace' && ' /mi'}
             </div>
           )
         })}
       </div>
     )
   }
+
+  const availableMetrics = hasTracks
+    ? Object.entries(METRICS)
+    : Object.entries(METRICS).filter(([key]) => key !== 'bpm')
 
   return (
     <div className="card" style={{ padding: '1rem' }}>
@@ -131,7 +147,7 @@ export default function PaceChart({ tracks, duration }) {
           Activity Chart
         </h3>
         <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
-          {Object.entries(METRICS).map(([key, m]) => (
+          {availableMetrics.map(([key, m]) => (
             <button
               key={key}
               onClick={() => toggleMetric(key)}
@@ -180,6 +196,8 @@ export default function PaceChart({ tracks, duration }) {
 
           <XAxis
             dataKey="time"
+            type="number"
+            domain={['dataMin', 'dataMax']}
             tickFormatter={fmtTime}
             tick={{ fontSize: 11, fill: '#999' }}
             axisLine={{ stroke: '#e0e0e0' }}
@@ -215,14 +233,16 @@ export default function PaceChart({ tracks, duration }) {
 
           {activeMetrics.map(key => {
             const m = METRICS[key]
+            // BPM is constant per song — use step function, not smooth interpolation
+            const lineType = key === 'bpm' ? 'stepAfter' : 'monotone'
             return (
               <Line
                 key={key}
                 yAxisId={key}
-                type="monotone"
+                type={lineType}
                 dataKey={m.key}
                 stroke={m.color}
-                strokeWidth={2}
+                strokeWidth={key === 'bpm' ? 2.5 : 2}
                 dot={false}
                 activeDot={{ r: 4, strokeWidth: 2, fill: '#fff' }}
                 connectNulls

@@ -254,10 +254,15 @@ def analyze_activity(activity_id):
         except Exception:
             pass
 
+    # Build raw activity streams for chart (even without songs)
+    from matcher import build_activity_series
+    raw_series = build_activity_series(streams)
+
     if not tracks:
         return jsonify({
             "activity": activity,
             "matched_tracks": [],
+            "raw_series": raw_series,
             "message": "No Spotify tracks found for this activity window."
         })
 
@@ -275,6 +280,7 @@ def analyze_activity(activity_id):
     return jsonify({
         "activity": activity,
         "matched_tracks": matched,
+        "raw_series": raw_series,
     })
 
 

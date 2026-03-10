@@ -43,7 +43,7 @@ export default function Results() {
   if (loading) return <div className="loading">Analyzing activity...</div>
   if (error) return <div className="message error">{error}</div>
 
-  const { activity, matched_tracks: tracks, message } = data
+  const { activity, matched_tracks: tracks, raw_series: rawSeries, message } = data
 
   // Compute overall activity stats
   const avgHr = tracks.length > 0
@@ -66,8 +66,9 @@ export default function Results() {
         </div>
       </div>
 
-      {tracks.length > 0 && (
-        <PaceChart tracks={tracks} duration={activity.duration_s} />
+      {/* Chart: show with songs if available, or raw streams without */}
+      {(tracks.length > 0 || (rawSeries && rawSeries.length > 0)) && (
+        <PaceChart tracks={tracks} duration={activity.duration_s} rawSeries={rawSeries || []} />
       )}
 
       {tracks.length === 0 ? (
